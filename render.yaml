@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: ai-stock-dashboard-proxy
+    runtime: python
+    plan: free
+    region: singapore
+    autoDeploy: false
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
