@@ -47,31 +47,76 @@ TWSE_ALL_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
 TWSE_DAY_URL = "https://www.twse.com.tw/exchangeReport/STOCK_DAY"
 
 
+def _to_float(v):
+    """TWSE 欄位可能是 '--'、空字串或含逗號，統一清洗"""
+    if v is None:
+        return None
+    s = str(v).replace(",", "").strip()
+    if s in ("", "--", "-", "X"):
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
 @app.get("/tw/quote/{code}")
 async def tw_quote(code: str):
     """單一台股即時（當日收盤）報價：價格、漲跌幅、成交量"""
     cache_key = "tw_all"
     data = cache_get(cache_key, ttl_sec=300)
     if data is None:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(TWSE_ALL_URL)
-            r.raise_for_status()
+        try:
+            async with httpx.AsyncClient(timeout=20, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; StockDashboard/1.0)",
+                "Accept": "application/json",
+            }) as client:
+                r = await client.get(TWSE_ALL_URL)
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"TWSE 連線失敗: {type(e).__name__}: {e}")
+        if r.status_code != 200:
+            raise HTTPException(502, f"TWSE 回應異常: HTTP {r.status_code}, body[:200]={r.text[:200]}")
+        try:
             data = r.json()
+        except ValueError:
+            raise HTTPException(502, f"TWSE 回應非JSON: body[:200]={r.text[:200]}")
+        if not isinstance(data, list):
+            raise HTTPException(502, f"TWSE 回應格式異常: {str(data)[:200]}")
         cache_set(cache_key, data)
 
     for row in data:
         if row.get("Code") == code:
-            close = float(row["ClosingPrice"])
-            chg = float(row.get("Change") or 0)
+            close = _to_float(row.get("ClosingPrice"))
+            if close is None:
+                raise HTTPException(502, f"該股今日無收盤價資料: {row}")
+            chg = _to_float(row.get("Change")) or 0.0
             prev = close - chg
             return {
                 "code": code,
                 "name": row.get("Name"),
                 "price": close,
                 "changePct": round(chg / prev * 100, 2) if prev else None,
-                "volume": int(row.get("TradeVolume") or 0),
+                "volume": int(_to_float(row.get("TradeVolume")) or 0),
             }
-    raise HTTPException(404, f"查無股票代碼 {code}")
+    raise HTTPException(404, f"查無股票代碼 {code}（共{len(data)}筆資料）")
+
+
+@app.get("/debug/twse")
+async def debug_twse():
+    """診斷用：直接顯示 TWSE API 的原始回應狀態"""
+    try:
+        async with httpx.AsyncClient(timeout=20, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; StockDashboard/1.0)",
+            "Accept": "application/json",
+        }) as client:
+            r = await client.get(TWSE_ALL_URL)
+        return {
+            "status": r.status_code,
+            "content_type": r.headers.get("content-type"),
+            "body_head": r.text[:300],
+        }
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 @app.get("/tw/history/{code}")
