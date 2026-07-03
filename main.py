@@ -60,12 +60,35 @@ def _to_float(v):
         return None
 
 
+def _tw_quote_via_yf(code: str):
+    """備援：證交所封鎖來源IP時，改用 Yahoo Finance 取得台股報價"""
+    for suffix in (".TW", ".TWO"):
+        try:
+            t = yf.Ticker(f"{code}{suffix}")
+            info = t.fast_info
+            price = info.get("lastPrice")
+            prev = info.get("previousClose")
+            if price:
+                return {
+                    "code": code,
+                    "name": None,
+                    "price": round(float(price), 2),
+                    "changePct": round((price - prev) / prev * 100, 2) if prev else None,
+                    "volume": int(info.get("lastVolume") or 0),
+                    "source": f"yahoo{suffix}",
+                }
+        except Exception:
+            continue
+    return None
+
+
 @app.get("/tw/quote/{code}")
 async def tw_quote(code: str):
     """單一台股即時（當日收盤）報價：價格、漲跌幅、成交量"""
     cache_key = "tw_all"
     data = cache_get(cache_key, ttl_sec=300)
     if data is None:
+      try:
         try:
             async with httpx.AsyncClient(timeout=20, headers={
                 "User-Agent": "Mozilla/5.0 (compatible; StockDashboard/1.0)",
@@ -83,6 +106,11 @@ async def tw_quote(code: str):
         if not isinstance(data, list):
             raise HTTPException(502, f"TWSE 回應格式異常: {str(data)[:200]}")
         cache_set(cache_key, data)
+      except HTTPException:
+        fb = _tw_quote_via_yf(code)
+        if fb:
+            return fb
+        raise
 
     for row in data:
         if row.get("Code") == code:
@@ -98,6 +126,9 @@ async def tw_quote(code: str):
                 "changePct": round(chg / prev * 100, 2) if prev else None,
                 "volume": int(_to_float(row.get("TradeVolume")) or 0),
             }
+    fb = _tw_quote_via_yf(code)
+    if fb:
+        return fb
     raise HTTPException(404, f"查無股票代碼 {code}（共{len(data)}筆資料）")
 
 
@@ -121,43 +152,71 @@ async def debug_twse():
 
 @app.get("/tw/history/{code}")
 async def tw_history(code: str, months: int = 6):
-    """個股歷史日K（近 N 個月，逐月呼叫 TWSE STOCK_DAY 並合併）"""
+    """個股歷史日K（優先證交所；來源IP被擋時自動改用 Yahoo Finance）"""
     months = max(1, min(months, 12))
-    today = dt.date.today()
-    bars = []
-    async with httpx.AsyncClient(timeout=15) as client:
-        for i in range(months - 1, -1, -1):
-            year = today.year
-            month = today.month - i
-            while month <= 0:
-                month += 12
-                year -= 1
-            date_str = f"{year}{month:02d}01"
-            cache_key = f"tw_day_{code}_{date_str}"
-            month_data = cache_get(cache_key, ttl_sec=3600 * 6)
-            if month_data is None:
-                r = await client.get(TWSE_DAY_URL, params={"response": "json", "date": date_str, "stockNo": code})
-                r.raise_for_status()
-                payload = r.json()
-                month_data = payload.get("data", [])
-                cache_set(cache_key, month_data)
-            for row in month_data:
-                try:
-                    y, m, d = row[0].split("/")
-                    y = int(y) + 1911  # 民國年轉西元年
-                    bars.append({
-                        "date": f"{y}-{int(m):02d}-{int(d):02d}",
-                        "open": float(row[3].replace(",", "")),
-                        "high": float(row[4].replace(",", "")),
-                        "low": float(row[5].replace(",", "")),
-                        "close": float(row[6].replace(",", "")),
-                        "volume": int(row[1].replace(",", "") or 0),
-                    })
-                except (ValueError, IndexError):
-                    continue
-    if not bars:
-        raise HTTPException(404, f"查無 {code} 的歷史資料")
-    return {"code": code, "bars": bars}
+    # --- 主來源：TWSE STOCK_DAY 逐月抓取 ---
+    try:
+        today = dt.date.today()
+        bars = []
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; StockDashboard/1.0)", "Accept": "application/json"}
+        async with httpx.AsyncClient(timeout=20, headers=headers) as client:
+            for i in range(months - 1, -1, -1):
+                year = today.year
+                month = today.month - i
+                while month <= 0:
+                    month += 12
+                    year -= 1
+                date_str = f"{year}{month:02d}01"
+                cache_key = f"tw_day_{code}_{date_str}"
+                month_data = cache_get(cache_key, ttl_sec=3600 * 6)
+                if month_data is None:
+                    r = await client.get(TWSE_DAY_URL, params={"response": "json", "date": date_str, "stockNo": code})
+                    r.raise_for_status()
+                    payload = r.json()
+                    month_data = payload.get("data", [])
+                    cache_set(cache_key, month_data)
+                for row in month_data:
+                    try:
+                        y, m, d = row[0].split("/")
+                        y = int(y) + 1911
+                        bars.append({
+                            "date": f"{y}-{int(m):02d}-{int(d):02d}",
+                            "open": float(row[3].replace(",", "")),
+                            "high": float(row[4].replace(",", "")),
+                            "low": float(row[5].replace(",", "")),
+                            "close": float(row[6].replace(",", "")),
+                            "volume": int(row[1].replace(",", "") or 0),
+                        })
+                    except (ValueError, IndexError):
+                        continue
+        if bars:
+            return {"code": code, "bars": bars, "source": "twse"}
+    except Exception:
+        pass  # 進入備援
+
+    # --- 備援：Yahoo Finance ---
+    period = "6mo" if months <= 6 else "1y"
+    for suffix in (".TW", ".TWO"):
+        try:
+            t = yf.Ticker(f"{code}{suffix}")
+            hist = t.history(period=period, interval="1d")
+            if hist.empty:
+                continue
+            bars = [
+                {
+                    "date": idx.strftime("%Y-%m-%d"),
+                    "open": round(float(row.Open), 2),
+                    "high": round(float(row.High), 2),
+                    "low": round(float(row.Low), 2),
+                    "close": round(float(row.Close), 2),
+                    "volume": int(row.Volume),
+                }
+                for idx, row in hist.iterrows()
+            ]
+            return {"code": code, "bars": bars, "source": f"yahoo{suffix}"}
+        except Exception:
+            continue
+    raise HTTPException(404, f"查無 {code} 的歷史資料（TWSE 與備援來源皆無法取得）")
 
 
 # =================================================================
