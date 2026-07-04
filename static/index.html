@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0E1420">
+<title>GG Stock — AI 股票研究儀表板</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.3/lightweight-charts.standalone.production.min.js"></script>
+<style>
+:root{--bg:#0E1420;--surface:#141B29;--surface2:#1A2233;--border:#252E40;--border2:#1D2534;
+--text:#E9EDF4;--muted:#8B96AC;--faint:#5C6680;--accent:#4C8DFF;--accent-soft:#274169;
+--gold:#D4A83B;--gold-soft:#3A3020;--up:#3ECF8E;--up-soft:#12281F;--down:#FF6B6B;--down-soft:#2E1518}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:linear-gradient(180deg,#0E1420,#0B0F17);color:var(--text);
+font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;min-height:100vh}
+header{position:sticky;top:0;z-index:10;background:rgba(14,20,32,.94);
+border-bottom:1px solid var(--border);backdrop-filter:blur(6px);padding:12px 16px}
+.wrap{max-width:960px;margin:0 auto;padding:0 4px}
+h1{font-size:17px;font-weight:600}.sub{font-size:11px;color:var(--faint)}
+nav{display:flex;margin-top:10px;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+nav button{flex:1;padding:9px 4px;background:var(--surface2);color:var(--muted);border:0;font-size:13px;font-weight:500;cursor:pointer}
+nav button.active{background:var(--accent);color:#0B0F17}
+main{max-width:960px;margin:0 auto;padding:16px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:14px}
+.card h3{font-size:14px;color:var(--gold);margin-bottom:12px;font-weight:600}
+.mkt-toggle{display:inline-flex;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.mkt-toggle button{padding:8px 20px;background:var(--surface2);color:var(--muted);border:0;font-size:14px;font-weight:600;cursor:pointer}
+.mkt-toggle button.active{background:var(--accent);color:#0B0F17}
+.searchrow{display:flex;gap:8px;margin-top:12px}
+.searchrow input{flex:1;padding:11px 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:15px;outline:none}
+.btn{padding:11px 18px;border-radius:10px;border:0;background:var(--accent);color:#0B0F17;font-weight:600;font-size:14px;cursor:pointer;white-space:nowrap}
+.btn.gold{background:var(--gold)}
+.btn.ghost{background:var(--surface2);color:var(--muted);border:1px solid var(--border)}
+.btn:disabled{opacity:.5}
+.hint{font-size:12px;color:var(--faint);margin-top:8px;line-height:1.6}
+.quote-head{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px}
+.qname{font-size:19px;font-weight:600}
+.qtags{display:flex;gap:6px;margin-top:4px;flex-wrap:wrap}
+.tag{font-size:11px;padding:2px 9px;border-radius:99px;background:var(--surface2);color:var(--muted)}
+.tag.live{background:var(--up-soft);color:var(--up)}
+.tag.warn{background:var(--gold-soft);color:var(--gold)}
+.tag.bad{background:var(--down-soft);color:var(--down)}
+.qprice{font-family:ui-monospace,monospace;font-size:30px;font-weight:700;text-align:right}
+.qchg{font-size:14px;font-weight:600;text-align:right}
+.up{color:var(--up)}.down{color:var(--down)}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border2)}
+.metric .l{font-size:11px;color:var(--faint);margin-bottom:3px}
+.metric .v{font-family:ui-monospace,monospace;font-size:15px;font-weight:600}
+.chart-controls{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.chart-controls button{padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-size:12px;cursor:pointer}
+.chart-controls button.active{background:var(--accent);color:#0B0F17;border-color:var(--accent)}
+#chart{width:100%;height:340px}
+.newsitem{padding:10px 0;border-bottom:1px solid var(--border2)}
+.newsitem:last-child{border-bottom:0}
+.newsitem .t{font-size:14px;font-weight:500}
+.newsitem .m{font-size:11px;color:var(--faint);margin-top:3px}
+.newsitem .s{font-size:13px;color:var(--muted);margin-top:4px}
+.scorebar{display:flex;align-items:center;gap:8px;margin:4px 0}
+.scorebar .l{font-size:11px;color:var(--faint);width:52px;flex-shrink:0}
+.scorebar .track{flex:1;height:7px;border-radius:99px;background:var(--border2)}
+.scorebar .fill{height:7px;border-radius:99px}
+.scorebar .n{font-family:ui-monospace,monospace;font-size:13px;width:30px;text-align:right}
+.rank-item{border:1px solid var(--border);border-radius:12px;margin-bottom:10px;overflow:hidden;background:var(--surface)}
+.rank-item.top{border-color:var(--gold)}
+.rank-head{display:flex;align-items:center;gap:12px;padding:14px;cursor:pointer}
+.rank-num{width:34px;height:34px;border-radius:9px;background:var(--surface2);color:var(--muted);
+display:flex;align-items:center;justify-content:center;font-family:ui-monospace,monospace;font-weight:700;flex-shrink:0}
+.rank-item.top .rank-num{background:var(--gold-soft);color:var(--gold)}
+.rank-main{flex:1;min-width:0}
+.rank-name{font-size:15px;font-weight:600}
+.rank-meta{font-size:11px;color:var(--faint);margin-top:2px}
+.rank-scores{width:150px;flex-shrink:0}
+.rank-detail{padding:0 14px 14px;border-top:1px solid var(--border2)}
+.reason-list{margin:10px 0 0;padding-left:2px;list-style:none}
+.reason-list li{font-size:13px;color:var(--muted);padding:3px 0;padding-left:16px;position:relative}
+.reason-list li:before{content:"›";position:absolute;left:2px;color:var(--accent)}
+.reason-list.chip li:before{color:var(--up)}
+.ai-box{background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-top:12px}
+.ai-box .ai-title{font-size:12px;color:var(--gold);font-weight:600;margin-bottom:8px}
+.ai-box p{font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:8px}
+.ai-box p:last-child{margin-bottom:0}
+.ai-box .caution{font-size:11px;color:var(--faint);font-style:italic;border-top:1px solid var(--border2);padding-top:8px;margin-top:4px}
+.watch-item{display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--border2);cursor:pointer}
+.watch-item:last-child{border-bottom:0}
+.wi-main{flex:1;min-width:0}
+.wi-name{font-size:15px;font-weight:600}
+.wi-code{font-size:11px;color:var(--faint)}
+.wi-price{font-family:ui-monospace,monospace;font-size:17px;font-weight:700;text-align:right}
+.wi-chg{font-size:12px;font-weight:600;text-align:right}
+.wi-del{background:none;border:0;color:var(--faint);font-size:18px;cursor:pointer;padding:6px}
+.row-between{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.loading{display:flex;align-items:center;justify-content:center;gap:8px;padding:36px;color:var(--muted);font-size:14px;flex-direction:column;text-align:center;line-height:1.7}
+.spinner{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.error{background:var(--down-soft);border:1px solid #4A2226;color:var(--down);padding:12px 14px;border-radius:10px;font-size:13px;margin-bottom:14px;line-height:1.6}
+.empty{text-align:center;padding:48px 16px;color:var(--faint);font-size:14px;line-height:1.8}
+.analyst-bar{display:flex;height:10px;border-radius:99px;overflow:hidden;margin:8px 0 6px}
+.analyst-legend{display:flex;justify-content:space-between;font-size:12px}
+.pt-row{display:flex;justify-content:space-between;font-size:12px;color:var(--faint);margin-top:6px}
+.alert-item{display:flex;gap:10px;padding:8px 0;font-size:13px;align-items:flex-start}
+.alert-item .lv{flex-shrink:0;font-size:11px;padding:2px 8px;border-radius:99px}
+footer{text-align:center;font-size:11px;color:var(--faint);padding:20px 16px 32px;line-height:1.7}
+@media(max-width:520px){.qprice{font-size:26px}#chart{height:280px}.metrics{grid-template-columns:repeat(3,1fr)}
+.rank-scores{width:120px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>📈 GG Stock AI 研究儀表板</h1>
+    <div class="sub">台股 · 美股 · 真實資料 · AI 研究解讀</div>
+    <nav>
+      <button id="tab-screener" class="active" onclick="switchTab('screener')">選股推薦</button>
+      <button id="tab-research" onclick="switchTab('research')">個股研究</button>
+      <button id="tab-watchlist" onclick="switchTab('watchlist')">自選股 <span id="watch-count"></span></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- ============ 選股推薦 ============ -->
+  <div id="page-screener">
+    <div class="card">
+      <div class="row-between">
+        <div class="mkt-toggle">
+          <button id="scr-tw" class="active" onclick="setScreenMarket('TW')">台股</button>
+          <button id="scr-us" onclick="setScreenMarket('US')">美股</button>
+        </div>
+        <button class="btn gold" id="scanbtn" onclick="doScan()">開始掃描</button>
+      </div>
+      <div class="hint">技術面以真實 6 個月日K計算（MA/RSI/MACD/量能）；台股另加 FinMind 法人籌碼評分。掃描後可讓 AI 進行研究型解讀（相對強弱排序＋理由）。</div>
+    </div>
+    <div id="screener-out"></div>
+  </div>
+
+  <!-- ============ 個股研究 ============ -->
+  <div id="page-research" style="display:none">
+    <div class="card">
+      <div class="mkt-toggle">
+        <button id="res-tw" class="active" onclick="setResearchMarket('TW')">台股</button>
+        <button id="res-us" onclick="setResearchMarket('US')">美股</button>
+      </div>
+      <div class="searchrow">
+        <input id="q" placeholder="輸入台股代碼，如 2330、0050" autocapitalize="characters" onkeydown="if(event.key==='Enter')doSearch()">
+        <button class="btn" id="searchbtn" onclick="doSearch()">查詢</button>
+      </div>
+      <div class="hint">首次查詢若伺服器剛喚醒需等約 30–50 秒。</div>
+    </div>
+    <div id="research-out"></div>
+  </div>
+
+  <!-- ============ 自選股 ============ -->
+  <div id="page-watchlist" style="display:none">
+    <div class="card">
+      <div class="row-between">
+        <div>
+          <div style="font-size:16px;font-weight:600">自選股清單</div>
+          <div class="hint" id="watch-updated" style="margin-top:2px">儲存於此裝置瀏覽器</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn ghost" id="refreshbtn" onclick="refreshWatchlist()">更新報價</button>
+          <button class="btn gold" id="patrolbtn" onclick="aiPatrol()">🤖 AI 巡檢</button>
+        </div>
+      </div>
+      <div class="mkt-toggle" style="margin-top:12px">
+        <button id="wl-all" class="active" onclick="setWatchMarket('ALL')">全部</button>
+        <button id="wl-tw" onclick="setWatchMarket('TW')">台股</button>
+        <button id="wl-us" onclick="setWatchMarket('US')">美股</button>
+      </div>
+    </div>
+    <div id="patrol-out"></div>
+    <div class="card">
+      <div class="empty" id="watch-empty">尚無自選股<br><span style="font-size:12px">在個股研究或選股推薦中點「☆ 加入自選」</span></div>
+      <div id="watch-list"></div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  本平台內容僅供研究參考，不構成投資建議。投資有風險，請自行判斷並諮詢專業人士。<br>
+  資料來源：FinMind / 台灣證券交易所 / Yahoo Finance（經自架代理），可能有延遲。AI 解讀為統計性訊號判讀，非預測。
+</footer>
+
+<script>
+/* ================= 基礎 ================= */
+const $=(id)=>document.getElementById(id);
+const fmt=(v,d=2)=>v==null?"—":Number(v).toFixed(d);
+const chgClass=(v)=>v>=0?"up":"down";
+const chgText=(v)=>v==null?"—":(v>=0?"+":"")+Number(v).toFixed(2)+"%";
+const esc=(s)=>String(s??"").replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]));
+async function api(path){
+  const r=await fetch(path);
+  if(!r.ok){let m="HTTP "+r.status;try{const j=await r.json();m=j.detail||j.error||m}catch(e){}throw new Error(m)}
+  return r.json();
+}
+function switchTab(t){
+  for(const p of["screener","research","watchlist"]){
+    $("page-"+p).style.display=p===t?"":"none";
+    $("tab-"+p).className=p===t?"active":"";
+  }
+  if(t==="watchlist")renderWatchlist();
+}
+function scoreBar(label,score,color){
+  if(score==null)return"";
+  return `<div class="scorebar"><span class="l">${label}</span><div class="track"><div class="fill" style="width:${score}%;background:${color}"></div></div><span class="n">${score}</span></div>`;
+}
+
+/* ================= 選股推薦 ================= */
+let screenMarket="TW";
+let lastScan=null;
+function setScreenMarket(m){
+  screenMarket=m;
+  $("scr-tw").className=m==="TW"?"active":"";
+  $("scr-us").className=m==="US"?"active":"";
+  $("screener-out").innerHTML="";
+  lastScan=null;
+}
+async function doScan(){
+  $("scanbtn").disabled=true;
+  $("screener-out").innerHTML='<div class="loading"><div class="spinner"></div>正在以真實資料掃描'+(screenMarket==="TW"?"台股（含 FinMind 籌碼）":"美股")+'股票池...<br><span style="font-size:12px;color:var(--faint)">首次掃描或伺服器喚醒需 30–60 秒</span></div>';
+  try{
+    lastScan=await api("/screen/"+screenMarket);
+    renderScan();
+  }catch(e){
+    $("screener-out").innerHTML='<div class="error">掃描失敗：'+esc(e.message)+'</div>';
+  }finally{$("scanbtn").disabled=false}
+}
+function renderScan(){
+  const rs=lastScan.results;
+  if(!rs.length){$("screener-out").innerHTML='<div class="error">掃描結果為空</div>';return}
+  let html='<div class="card"><div class="row-between"><h3 style="margin:0">掃描結果（依綜合評分排序）</h3>'+
+    '<button class="btn gold" id="aibtn" onclick="aiScreen()">🤖 AI 研究解讀</button></div>'+
+    '<div id="ai-screen-out"></div></div>';
+  rs.forEach((r,i)=>{
+    const inW=getWatchlist().some(s=>s.code===r.ticker);
+    html+=`<div class="rank-item ${i===0?"top":""}">
+      <div class="rank-head" onclick="toggleRank(${i})">
+        <div class="rank-num">${i+1}</div>
+        <div class="rank-main">
+          <div class="rank-name">${esc(r.name)} <span style="font-size:11px;color:var(--faint)">${esc(r.ticker)}</span></div>
+          <div class="rank-meta">現價 ${fmt(r.price)} · 20日 <span class="${chgClass(r.chg20d)}">${chgText(r.chg20d)}</span> · RSI ${r.rsi}</div>
+        </div>
+        <div class="rank-scores">
+          ${scoreBar("綜合",r.total,"var(--gold)")}
+          ${scoreBar("技術",r.techScore,"var(--accent)")}
+          ${r.chipScore!=null?scoreBar("籌碼",r.chipScore,"var(--up)"):""}
+        </div>
+      </div>
+      <div class="rank-detail" id="rank-detail-${i}" style="display:none">
+        <ul class="reason-list">${r.techReasons.map(x=>`<li>${esc(x)}</li>`).join("")||"<li>技術訊號中性</li>"}</ul>
+        ${r.chipReasons&&r.chipReasons.length?`<ul class="reason-list chip">${r.chipReasons.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn ghost" onclick="event.stopPropagation();openResearch('${r.ticker}')">完整研究</button>
+          <button class="btn ghost" onclick="event.stopPropagation();toggleWatchCode('${r.ticker}','${esc(r.name)}','${screenMarket}');renderScan()">${inW?"★ 移除自選":"☆ 加入自選"}</button>
+        </div>
+      </div>
+    </div>`;
+  });
+  $("screener-out").innerHTML=html;
+}
+function toggleRank(i){
+  const el=$("rank-detail-"+i);
+  el.style.display=el.style.display==="none"?"":"none";
+}
+async function aiScreen(){
+  $("aibtn").disabled=true;
+  $("ai-screen-out").innerHTML='<div class="loading" style="padding:16px"><div class="spinner"></div>AI 分析中...</div>';
+  try{
+    const r=await api("/ai/screen/"+screenMarket);
+    const a=r.ai;
+    $("ai-screen-out").innerHTML=`<div class="ai-box">
+      <div class="ai-title">🤖 AI 盤面解讀（研究型）</div>
+      <p>${esc(a.overview)}</p>
+      <p><b style="color:var(--text)">相對強弱：</b>${esc(a.ranking)}</p>
+      ${(a.picks||[]).map(p=>`<p><b style="color:var(--accent)">${esc(p.ticker)}</b> — ${esc(p.comment)}</p>`).join("")}
+      <div class="caution">⚠ ${esc(a.caution)}</div>
+    </div>`;
+  }catch(e){
+    $("ai-screen-out").innerHTML='<div class="error" style="margin-top:10px">AI 解讀失敗：'+esc(e.message)+'</div>';
+  }finally{const b=$("aibtn");if(b)b.disabled=false}
+}
+
+/* ================= 個股研究 ================= */
+let researchMarket="TW";
+let currentStock=null;
+let allBars=[];let chartObj=null,candleSeries=null,volSeries=null,maSeriesMap={};
+let currentFrame="D";let maVisible={ma5:true,ma20:true,ma60:true};
+function setResearchMarket(m){
+  researchMarket=m;
+  $("res-tw").className=m==="TW"?"active":"";
+  $("res-us").className=m==="US"?"active":"";
+  $("q").placeholder=m==="TW"?"輸入台股代碼，如 2330、0050":"輸入美股代碼，如 AAPL、NVDA";
+}
+function openResearch(ticker){
+  const isTW=ticker.endsWith(".TW");
+  switchTab("research");
+  setResearchMarket(isTW?"TW":"US");
+  $("q").value=isTW?ticker.replace(".TW",""):ticker;
+  doSearch();
+}
+async function doSearch(){
+  const q=$("q").value.trim().toUpperCase();
+  if(!q)return;
+  $("searchbtn").disabled=true;
+  $("research-out").innerHTML='<div class="loading"><div class="spinner"></div>查詢真實資料中...<br><span style="font-size:12px;color:var(--faint)">伺服器剛喚醒需 30–50 秒</span></div>';
+  try{
+    if(researchMarket==="TW")await loadTW(q.replace(".TW",""));
+    else await loadUS(q);
+  }catch(e){
+    $("research-out").innerHTML='<div class="error">查詢失敗：'+esc(e.message)+'<br>請確認代碼與市場選擇正確。</div>';
+  }finally{$("searchbtn").disabled=false}
+}
+async function loadTW(code){
+  const[quote,hist,chip]=await Promise.all([
+    api("/tw/quote/"+code),
+    api("/tw/history/"+code+"?months=6").catch(()=>null),
+    api("/tw/chip/"+code).catch(()=>null),
+  ]);
+  currentStock={market:"TW",code:code+".TW",apiCode:code,name:quote.name||code};
+  renderStock({
+    name:quote.name||code,codeLabel:code+" · 台股",
+    price:quote.price,changePct:quote.changePct,
+    metrics:[["成交量",quote.volume?quote.volume.toLocaleString():"—"]],
+    bars:hist?hist.bars:null,chip,analyst:null,news:null,
+    source:(hist&&hist.source==="finmind")?"FinMind":(quote.source||"").startsWith("yahoo")?"Yahoo":"證交所",
+  });
+}
+async function loadUS(ticker){
+  const[quote,profile,hist,analyst,news]=await Promise.all([
+    api("/us/quote/"+ticker),
+    api("/us/profile/"+ticker).catch(()=>null),
+    api("/us/history/"+ticker+"?period=6mo").catch(()=>null),
+    api("/us/analyst/"+ticker).catch(()=>null),
+    api("/us/news/"+ticker).catch(()=>null),
+  ]);
+  currentStock={market:"US",code:ticker,apiCode:ticker,name:profile?.name||ticker};
+  const wk52=profile?.week52High!=null&&profile?.week52Low!=null&&profile.week52High!==profile.week52Low
+    ?Math.round((quote.price-profile.week52Low)/(profile.week52High-profile.week52Low)*100):null;
+  renderStock({
+    name:profile?.name||ticker,codeLabel:ticker+" · "+(profile?.exchange||"US")+(profile?.industry?" · "+profile.industry:""),
+    price:quote.price,changePct:quote.changePct,
+    metrics:[["本益比",fmt(profile?.pe,1)],["EPS",fmt(profile?.eps)],
+      ["殖利率",profile?.dividendYield!=null?fmt(profile.dividendYield,2)+"%":"—"],
+      ["營收YoY",profile?.revenueGrowth!=null?chgText(profile.revenueGrowth):"—"],
+      ["EPS YoY",profile?.earningsGrowth!=null?chgText(profile.earningsGrowth):"—"],
+      ["52週位置",wk52!=null?wk52+"%":"—"]],
+    bars:hist?hist.bars:null,chip:null,analyst,news:news?.news,
+    summary:profile?.summary,source:"Yahoo Finance",
+  });
+}
+function renderStock(d){
+  const inW=getWatchlist().some(s=>s.code===currentStock.code);
+  let html=`<div class="card">
+    <div class="quote-head">
+      <div><div class="qname">${esc(d.name)}</div>
+        <div class="qtags"><span class="tag">${esc(d.codeLabel)}</span><span class="tag live">即時 · ${esc(d.source)}</span></div></div>
+      <div><div class="qprice">${fmt(d.price)}</div><div class="qchg ${chgClass(d.changePct)}">${chgText(d.changePct)}</div></div>
+    </div>
+    ${d.metrics?.length?`<div class="metrics">${d.metrics.map(([l,v])=>`<div class="metric"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("")}</div>`:""}
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn gold" id="ai-report-btn" onclick="aiReport()">🤖 生成 AI 研究報告</button>
+      <button class="btn ghost" id="watch-toggle-btn" onclick="toggleWatchCurrent()">${inW?"★ 已在自選":"☆ 加入自選"}</button>
+    </div>
+    <div id="ai-report-out"></div>
+    ${d.summary?`<div style="font-size:13px;color:var(--muted);margin-top:12px;line-height:1.6">${esc(d.summary.slice(0,220))}${d.summary.length>220?"...":""}</div>`:""}
+  </div>`;
+
+  if(d.chip&&(d.chip.foreign
