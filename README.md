@@ -1,73 +1,91 @@
-# AI Stock Dashboard 後端代理 — 部署說明
+# GG Stock — AI 股票研究儀表板
 
-這個後端解決一個核心問題：瀏覽器（artifact）直接呼叫證交所或 Yahoo Finance
-常會被 CORS 政策擋下。後端對後端的請求不受此限制，並統一補上允許跨網域的標頭。
+台股 + 美股的 AI 研究工具：選股推薦（技術面 + 籌碼面評分）、個股研究（真實K線、
+籌碼、分析師評等）、自選股清單與 AI 巡檢。前後端同一服務部署，任何裝置開網址即用。
 
-## 提供的端點
+**免責聲明**：本專案內容僅供研究參考，不構成投資建議。
+
+---
+
+## 架構
+
+```
+瀏覽器（手機/平板/電腦）
+   │  同網域，無 CORS 問題
+   ▼
+FastAPI（Render.com）
+   ├─ static/index.html   ← 前端（單檔，無建置流程）
+   ├─ /tw/*  台股：報價、歷史K線、籌碼
+   ├─ /us/*  美股：報價、歷史、基本面、分析師、新聞
+   ├─ /screen/*  選股掃描（後端計算真實技術指標）
+   └─ /ai/*  AI 分析（後端代理 Anthropic API）
+   │
+   ▼
+FinMind ／ Yahoo Finance(yfinance) ／ TWSE
+```
+
+## 檔案
+
+| 檔案 | 用途 |
+|---|---|
+| `main.py` | 全部後端邏輯（資料抓取、指標計算、評分、AI 端點、靜態伺服） |
+| `static/index.html` | 全部前端（三分頁 UI、K線圖、AI 呈現），無需編譯 |
+| `requirements.txt` | Python 依賴 |
+| `render.yaml` | Render 一鍵部署設定 |
+
+## API 端點
 
 | 端點 | 說明 |
 |---|---|
-| `GET /tw/quote/{code}` | 台股即時（當日）報價，例：`/tw/quote/2330` |
-| `GET /tw/history/{code}?months=6` | 台股歷史日K（近N個月，最多12個月） |
-| `GET /us/quote/{ticker}` | 美股即時報價，例：`/us/quote/AAPL` |
-| `GET /us/history/{ticker}?period=6mo&interval=1d` | 美股歷史日K |
-| `GET /us/profile/{ticker}` | 美股公司資料、本益比、殖利率、成長率、52週高低 |
-| `GET /us/news/{ticker}` | 美股近期新聞 |
 | `GET /health` | 健康檢查 |
+| `GET /tw/quote/{code}` | 台股報價（TWSE → Yahoo 備援） |
+| `GET /tw/history/{code}?months=6` | 台股日K（TWSE → FinMind → Yahoo） |
+| `GET /tw/chip/{code}` | 台股籌碼：外資連買、投信/外資5日買賣超、融資增減、外資持股（FinMind） |
+| `GET /us/quote|history|profile|news|analyst/{ticker}` | 美股各項（yfinance） |
+| `GET /screen/{TW\|US}` | 掃描股票池：技術分（真實日K計算）＋台股籌碼分，綜合排序 |
+| `GET /ai/screen/{market}` | AI 盤面解讀（研究型：相對強弱排序＋理由） |
+| `GET /ai/stock/{market}/{code}` | AI 個股研究報告 |
+| `GET /ai/watch?codes=2330,AAPL` | AI 巡檢自選股，標注轉強/轉弱/注意 |
 
-資料來源：台股 = 證交所公開資訊；美股 = Yahoo Finance（透過 yfinance 套件）。
-皆為公開免費資料，無需任何 API 金鑰。
+## 部署（Render.com 免費方案）
 
----
+1. Fork 或上傳本 repo（需 Public）
+2. 一鍵部署：`https://render.com/deploy?repo=https://github.com/<帳號>/<repo>`
+3. **設定環境變數**（Render → 服務 → Environment）：
 
-## 一鍵部署（最省力）
+| 變數 | 必要性 | 取得方式 |
+|---|---|---|
+| `FINMIND_TOKEN` | 台股籌碼功能需要 | finmindtrade.com 免費註冊 |
+| `ANTHROPIC_API_KEY` | 所有 AI 功能需要 | console.anthropic.com（按用量計費） |
+| `AI_MODEL` | 選填 | 預設 `claude-sonnet-4-6` |
 
-這個 repo 已內含 `render.yaml`，支援 Render 的一鍵部署按鈕。
+4. 部署完成後開 `https://你的網址.onrender.com` 即為完整儀表板
+5. 修改程式後需手動觸發：Manual Deploy → Deploy latest commit（`render.yaml` 設 `autoDeploy: false`）
 
-### 前置：把這 4 個檔案放上一個「公開」的 GitHub repo
+## 維護必讀：踩過的坑
 
-1. 到 https://github.com 登入 →右上角 **+** → **New repository**
-2. 取名（例如 `stock-dashboard-backend`），選 **Public**，按 **Create repository**
-3. 在新 repo 頁面點 **uploading an existing file**，把
-   `main.py`、`requirements.txt`、`render.yaml`、`README.md` 拖進去 → **Commit changes**
+這些是開發過程實際遇到並解決的問題，改程式前先讀：
 
-### 一鍵部署按鈕
+1. **證交所（TWSE）封鎖海外機房 IP**。從 Render 呼叫 `www.twse.com.tw` 或
+   `openapi.twse.com.tw` 會收到安全阻擋頁（HTML 而非 JSON）。所以台股資料
+   的備援鏈是 TWSE → FinMind → Yahoo，實際上多半由 FinMind/Yahoo 供應。
+   不要移除備援邏輯。
+2. **yfinance `fast_info` 欄位是 camelCase**（`lastPrice`、`previousClose`、
+   `yearHigh`），不是 snake_case。
+3. **FinMind 免費額度有限**（註冊後約 600 次/小時），所以籌碼資料快取 4 小時、
+   掃描結果快取 30 分鐘。調整快取前先評估額度。
+4. **Render 免費方案閒置 15 分鐘會休眠**，喚醒需 30–50 秒。前端的等待提示
+   文案是配合這個行為寫的。
+5. **AI 呼叫是實際花費**（每份報告約 NT$0.3–1）。所以 AI 全部按鈕觸發、
+   結果快取（個股報告 4 小時、盤面解讀 1 小時）。不要改成自動生成。
+6. **AI 風格為「研究型」**：可做相對強弱排序與理由，不給買賣指令、不用保證
+   性字眼、資料不足須明說。這些規則寫在 `main.py` 的 `AI_STYLE_RULES`，
+   修改提示詞時保留。
+7. 瀏覽器直連金融資料源會被 CORS 擋，這正是本專案採用後端代理架構的原因。
+   不要嘗試把資料抓取搬回前端。
 
-把下面這行貼到你 repo 的 README（或直接用瀏覽器打開網址，
-將 `<你的帳號>/<你的repo>` 換成實際的）：
+## 自訂
 
-```markdown
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/<你的帳號>/<你的repo>)
-```
-
-點按鈕後：
-1. 若尚未登入 Render，先用 GitHub 帳號登入
-2. Render 會自動讀取 `render.yaml`，顯示即將建立的服務
-3. 按 **Deploy Blueprint**，等 2–3 分鐘
-
-### 測試
-
-部署完成後會得到一個網址，例如
-`https://ai-stock-dashboard-proxy.onrender.com`。
-瀏覽器打開 `你的網址/health`，看到 `{"status":"ok",...}` 即成功。
-再測 `你的網址/tw/quote/2330` 確認台股報價正常。
-
-**注意**：免費方案閒置 15 分鐘會休眠，下次請求需約 30–50 秒喚醒（正常現象）。
-
----
-
-## 部署方式二：Railway.app
-
-1. https://railway.app 註冊，New Project → Deploy from GitHub repo
-2. 選擇同一個 repository，Railway 會自動偵測 Python 專案
-3. 在 Settings → Deploy 設定 Start Command：
-   `uvicorn main:app --host 0.0.0.0 --port $PORT`
-4. 部署完成後在 Settings → Networking 產生一組公開網址
-
----
-
-## 部署後：接回 Dashboard
-
-拿到部署網址後，把它貼到 Dashboard 的「自選股」分頁中新增的
-「後端代理網址」欄位，Dashboard 會自動改用這個後端取得即時報價與
-真實歷史K線，不再需要 Finnhub 金鑰或不穩定的搜尋備援。
+- **調整選股池**：改 `main.py` 的 `POOLS`（台股代碼帶 `.TW` 後綴）
+- **調整評分權重**：`screen()` 內 `techScore * 0.5 + chipScore * 0.5`
+- **調整 AI 模型**：設環境變數 `AI_MODEL`
