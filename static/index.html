@@ -365,4 +365,215 @@ function renderStock(d){
     ${d.summary?`<div style="font-size:13px;color:var(--muted);margin-top:12px;line-height:1.6">${esc(d.summary.slice(0,220))}${d.summary.length>220?"...":""}</div>`:""}
   </div>`;
 
-  if(d.chip&&(d.chip.foreign
+  if(d.chip&&(d.chip.foreignStreak!=null||d.chip.trustNet5d!=null||d.chip.marginChg5d!=null||d.chip.foreignHold!=null)){
+    const c=d.chip;
+    const chipMetrics=[
+      ["外資連買/賣",c.foreignStreak!=null?(c.foreignStreak>0?"連買 "+c.foreignStreak+" 日":c.foreignStreak<0?"連賣 "+(-c.foreignStreak)+" 日":"持平"):"—"],
+      ["外資5日買賣超",c.foreignNet5d!=null?c.foreignNet5d.toLocaleString()+" 張":"—"],
+      ["投信5日買賣超",c.trustNet5d!=null?c.trustNet5d.toLocaleString()+" 張":"—"],
+      ["融資5日增減",c.marginChg5d!=null?chgText(c.marginChg5d):"—"],
+      ["外資持股",c.foreignHold!=null?c.foreignHold+"%":"—"],
+    ];
+    html+=`<div class="card"><h3>籌碼面（FinMind · 每日盤後更新）</h3>
+      <div class="metrics" style="border:0;padding:0;margin:0">${chipMetrics.map(([l,v])=>`<div class="metric"><div class="l">${l}</div><div class="v" style="font-size:14px">${v}</div></div>`).join("")}</div>
+      ${c.score!=null?`<div style="margin-top:12px">${scoreBar("籌碼分",c.score,"var(--up)")}</div>`:""}
+      ${c.reasons&&c.reasons.length?`<ul class="reason-list chip">${c.reasons.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+    </div>`;
+  }
+
+  if(d.bars&&d.bars.length){
+    html+=`<div class="card"><h3>技術線型（真實歷史K線）</h3>
+      <div class="chart-controls">
+        <button class="active" onclick="setFrame(this,'D')">日K</button>
+        <button onclick="setFrame(this,'W')">週K</button>
+        <button onclick="setFrame(this,'M')">月K</button>
+        <span style="flex:1"></span>
+        <button class="active" onclick="toggleMA(this,'ma5')">MA5</button>
+        <button class="active" onclick="toggleMA(this,'ma20')">MA20</button>
+        <button class="active" onclick="toggleMA(this,'ma60')">MA60</button>
+      </div><div id="chart"></div></div>`;
+  }
+
+  if(d.analyst&&(d.analyst.recommendations||d.analyst.priceTarget)){
+    const rec=d.analyst.recommendations,pt=d.analyst.priceTarget;let inner="";
+    if(rec){const total=rec.strongBuy+rec.buy+rec.hold+rec.sell+rec.strongSell;
+      if(total>0){const b=rec.strongBuy+rec.buy,s=rec.sell+rec.strongSell;
+        inner+=`<div style="font-size:12px;color:var(--faint)">評等分布（${total} 位分析師）</div>
+        <div class="analyst-bar"><div style="width:${b/total*100}%;background:var(--up)"></div>
+        <div style="width:${rec.hold/total*100}%;background:var(--gold)"></div>
+        <div style="width:${s/total*100}%;background:var(--down)"></div></div>
+        <div class="analyst-legend"><span class="up">買進 ${b}</span><span style="color:var(--gold)">持有 ${rec.hold}</span><span class="down">賣出 ${s}</span></div>`}}
+    if(pt&&pt.mean!=null){const up=d.price?((pt.mean-d.price)/d.price*100):null;
+      inner+=`<div style="margin-top:14px;font-size:12px;color:var(--faint)">12個月目標價（均值）${up!=null?`<span class="${chgClass(up)}">${chgText(up)}</span>`:""}</div>
+      <div style="font-family:ui-monospace,monospace;font-size:24px;font-weight:700;margin-top:2px">${fmt(pt.mean)}</div>
+      <div class="pt-row"><span>低 ${fmt(pt.low)}</span><span>中位 ${fmt(pt.median)}</span><span>高 ${fmt(pt.high)}</span></div>`}
+    if(inner)html+=`<div class="card"><h3>分析師評等與目標價</h3>${inner}</div>`;
+  }
+
+  if(d.news&&d.news.length){
+    html+=`<div class="card"><h3>最新新聞</h3>${d.news.map(n=>`<div class="newsitem">
+      <div class="t">${esc(n.title)}</div><div class="m">${esc(n.source)}${n.date?" · "+esc(n.date):""}</div>
+      ${n.summary?`<div class="s">${esc(n.summary)}</div>`:""}</div>`).join("")}</div>`;
+  }
+
+  $("research-out").innerHTML=html;
+  if(d.bars&&d.bars.length){allBars=d.bars;initChart();setFrameData("D")}
+}
+async function aiReport(){
+  if(!currentStock)return;
+  $("ai-report-btn").disabled=true;
+  $("ai-report-out").innerHTML='<div class="loading" style="padding:16px"><div class="spinner"></div>AI 彙整資料並生成報告中（約 10–30 秒）...</div>';
+  try{
+    const r=await api("/ai/stock/"+currentStock.market+"/"+currentStock.apiCode);
+    const a=r.ai,sc=a.scores||{};
+    $("ai-report-out").innerHTML=`<div class="ai-box">
+      <div class="ai-title">🤖 AI 研究報告</div>
+      <p>${esc(a.summary)}</p>
+      <p><b style="color:var(--up)">亮點：</b></p>
+      ${(a.highlights||[]).map(h=>`<p style="margin-left:12px">· ${esc(h)}</p>`).join("")}
+      <p><b style="color:var(--down)">風險：</b></p>
+      ${(a.risks||[]).map(x=>`<p style="margin-left:12px">· ${esc(x.title)} — ${esc(x.impact)}</p>`).join("")}
+      <div style="margin:10px 0">
+        ${scoreBar("技術",sc.technical,"var(--accent)")}
+        ${scoreBar("籌碼",sc.chips,"var(--up)")}
+        ${scoreBar("基本面",sc.fundamental,"var(--gold)")}
+        ${scoreBar("情緒",sc.sentiment,"#B48BE0")}
+        ${scoreBar("綜合",sc.overall,"var(--gold)")}
+      </div>
+      <p style="font-size:12px;color:var(--faint)">${esc(sc.reason||"")}</p>
+      <p><b style="color:var(--text)">結論：</b>${esc(a.conclusion)}</p>
+      <div class="caution">⚠ AI 解讀為統計性訊號判讀，僅供研究參考，非投資建議。</div>
+    </div>`;
+  }catch(e){
+    $("ai-report-out").innerHTML='<div class="error" style="margin-top:10px">AI 報告失敗：'+esc(e.message)+'</div>';
+  }finally{$("ai-report-btn").disabled=false}
+}
+
+/* ================= K線圖 ================= */
+function initChart(){
+  const el=$("chart");el.innerHTML="";
+  chartObj=LightweightCharts.createChart(el,{
+    layout:{background:{color:"transparent"},textColor:"#8B96AC",fontSize:11},
+    grid:{vertLines:{color:"#1D2534"},horzLines:{color:"#1D2534"}},
+    rightPriceScale:{borderColor:"#252E40"},timeScale:{borderColor:"#252E40"},
+    crosshair:{mode:0},autoSize:true});
+  candleSeries=chartObj.addCandlestickSeries({upColor:"#3ECF8E",downColor:"#FF6B6B",
+    borderUpColor:"#3ECF8E",borderDownColor:"#FF6B6B",wickUpColor:"#3ECF8E",wickDownColor:"#FF6B6B"});
+  volSeries=chartObj.addHistogramSeries({priceScaleId:"",priceFormat:{type:"volume"}});
+  volSeries.priceScale().applyOptions({scaleMargins:{top:.82,bottom:0}});
+  maSeriesMap={
+    ma5:chartObj.addLineSeries({color:"#E8D5A0",lineWidth:1,priceLineVisible:false,lastValueVisible:false}),
+    ma20:chartObj.addLineSeries({color:"#D4A83B",lineWidth:1,priceLineVisible:false,lastValueVisible:false}),
+    ma60:chartObj.addLineSeries({color:"#4C8DFF",lineWidth:1,priceLineVisible:false,lastValueVisible:false})};
+}
+function aggregate(bars,frame){
+  if(frame==="D")return bars;
+  const n=frame==="W"?5:21,out=[];
+  for(let i=0;i<bars.length;i+=n){const c=bars.slice(i,i+n);if(!c.length)break;
+    out.push({date:c[0].date,open:c[0].open,close:c[c.length-1].close,
+      high:Math.max(...c.map(b=>b.high)),low:Math.min(...c.map(b=>b.low)),
+      volume:c.reduce((s,b)=>s+b.volume,0)})}
+  return out;
+}
+function maData(bars,n){const out=[];
+  for(let i=n-1;i<bars.length;i++){let s=0;for(let j=i-n+1;j<=i;j++)s+=bars[j].close;
+    out.push({time:bars[i].date,value:+(s/n).toFixed(2)})}
+  return out;}
+function setFrameData(frame){
+  currentFrame=frame;
+  const bars=aggregate(allBars,frame);
+  candleSeries.setData(bars.map(b=>({time:b.date,open:b.open,high:b.high,low:b.low,close:b.close})));
+  volSeries.setData(bars.map(b=>({time:b.date,value:b.volume,color:b.close>=b.open?"rgba(62,207,142,.45)":"rgba(255,107,107,.45)"})));
+  for(const k of["ma5","ma20","ma60"]){const n=k==="ma5"?5:k==="ma20"?20:60;
+    maSeriesMap[k].setData(maVisible[k]?maData(bars,n):[])}
+  chartObj.timeScale().fitContent();
+}
+function setFrame(btn,frame){
+  btn.parentElement.querySelectorAll("button").forEach((b,i)=>{if(i<3)b.classList.remove("active")});
+  btn.classList.add("active");setFrameData(frame);
+}
+function toggleMA(btn,key){maVisible[key]=!maVisible[key];btn.classList.toggle("active",maVisible[key]);setFrameData(currentFrame)}
+
+/* ================= 自選股 ================= */
+function getWatchlist(){try{return JSON.parse(localStorage.getItem("gg-watchlist")||"[]")}catch(e){return[]}}
+function saveWatchlist(l){localStorage.setItem("gg-watchlist",JSON.stringify(l));
+  $("watch-count").textContent=l.length?"("+l.length+")":""}
+function toggleWatchCode(code,name,market){
+  let l=getWatchlist();
+  if(l.some(s=>s.code===code))l=l.filter(s=>s.code!==code);
+  else l.push({code,name,market});
+  saveWatchlist(l);
+}
+function toggleWatchCurrent(){
+  if(!currentStock)return;
+  toggleWatchCode(currentStock.code,currentStock.name,currentStock.market);
+  const inW=getWatchlist().some(s=>s.code===currentStock.code);
+  $("watch-toggle-btn").textContent=inW?"★ 已在自選":"☆ 加入自選";
+}
+function getWatchData(){try{return JSON.parse(localStorage.getItem("gg-watchdata")||"{}")}catch(e){return{}}}
+let watchMarket="ALL";
+function setWatchMarket(m){
+  watchMarket=m;
+  $("wl-all").className=m==="ALL"?"active":"";
+  $("wl-tw").className=m==="TW"?"active":"";
+  $("wl-us").className=m==="US"?"active":"";
+  renderWatchlist();
+}
+function filteredWatchlist(){
+  const list=getWatchlist();
+  return watchMarket==="ALL"?list:list.filter(s=>s.market===watchMarket);
+}
+function renderWatchlist(){
+  const all=getWatchlist(),list=filteredWatchlist(),data=getWatchData();
+  $("watch-empty").style.display=list.length?"none":"";
+  if(!list.length&&all.length)$("watch-empty").innerHTML=(watchMarket==="TW"?"台股":"美股")+"清單目前是空的";
+  else if(!all.length)$("watch-empty").innerHTML='尚無自選股<br><span style="font-size:12px">在個股研究或選股推薦中點「☆ 加入自選」</span>';
+  $("watch-list").innerHTML=list.map(s=>{const d=data[s.code];
+    return `<div class="watch-item" onclick="openResearch('${s.code}')">
+      <div class="wi-main"><div class="wi-name">${esc(s.name||s.code)}</div>
+      <div class="wi-code">${esc(s.code)} · ${s.market==="TW"?"台股":"美股"}</div></div>
+      <div><div class="wi-price">${d?fmt(d.price):"—"}</div>
+      <div class="wi-chg ${d?chgClass(d.changePct):""}">${d?chgText(d.changePct):"待更新"}</div></div>
+      <button class="wi-del" onclick="event.stopPropagation();removeWatch('${s.code}')">✕</button></div>`}).join("");
+  const times=Object.values(data).map(d=>d.t).filter(Boolean);
+  if(times.length)$("watch-updated").textContent="更新於 "+new Date(Math.max(...times)).toLocaleString("zh-TW",{hour12:false});
+}
+function removeWatch(code){saveWatchlist(getWatchlist().filter(s=>s.code!==code));renderWatchlist()}
+async function refreshWatchlist(){
+  const list=filteredWatchlist();if(!list.length)return;
+  $("refreshbtn").disabled=true;$("refreshbtn").textContent="更新中...";
+  const data=getWatchData();
+  await Promise.all(list.map(async s=>{try{
+    const q=s.market==="TW"?await api("/tw/quote/"+s.code.replace(".TW","")):await api("/us/quote/"+s.code);
+    data[s.code]={price:q.price,changePct:q.changePct,t:Date.now()};
+  }catch(e){}}));
+  localStorage.setItem("gg-watchdata",JSON.stringify(data));
+  $("refreshbtn").disabled=false;$("refreshbtn").textContent="更新報價";
+  renderWatchlist();
+}
+async function aiPatrol(){
+  const list=filteredWatchlist();
+  if(!list.length){$("patrol-out").innerHTML='<div class="error">目前篩選範圍內沒有自選股</div>';return}
+  $("patrolbtn").disabled=true;
+  $("patrol-out").innerHTML='<div class="loading" style="padding:16px"><div class="spinner"></div>AI 巡檢自選股訊號中（約 20–60 秒）...</div>';
+  try{
+    const codes=list.map(s=>s.market==="TW"?s.code.replace(".TW",""):s.code).join(",");
+    const r=await api("/ai/watch?codes="+encodeURIComponent(codes));
+    const a=r.ai;
+    const lvColor={"轉強":"background:var(--up-soft);color:var(--up)","轉弱":"background:var(--down-soft);color:var(--down)","注意":"background:var(--gold-soft);color:var(--gold)"};
+    $("patrol-out").innerHTML=`<div class="card"><div class="ai-box" style="margin-top:0">
+      <div class="ai-title">🤖 AI 巡檢結果</div>
+      <p>${esc(a.summary)}</p>
+      ${(a.alerts||[]).map(x=>`<div class="alert-item"><span class="lv" style="${lvColor[x.level]||lvColor["注意"]}">${esc(x.level)}</span><span><b>${esc(x.code)}</b> — ${esc(x.note)}</span></div>`).join("")}
+      <div class="caution">⚠ ${esc(a.caution)}</div>
+    </div></div>`;
+  }catch(e){
+    $("patrol-out").innerHTML='<div class="error">AI 巡檢失敗：'+esc(e.message)+'</div>';
+  }finally{$("patrolbtn").disabled=false}
+}
+
+/* ================= 初始化 ================= */
+saveWatchlist(getWatchlist());
+</script>
+</body>
+</html>
